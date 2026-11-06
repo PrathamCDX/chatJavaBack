@@ -1,0 +1,17 @@
+# Render Blueprint: New > Blueprint in the Render dashboard, then pick this repository
+services:
+  - type: web
+    name: demo
+    runtime: docker
+    plan: free
+    # /health itself is a 404; any /health/<id> answers 200
+    healthCheckPath: /health/live
+    envVars:
+      # Generated once by Render; without it the app falls back to the public default in application.properties
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JPA_SHOW_SQL
+        value: "false"
+      # Asked for when the Blueprint is created: the frontend's URL, e.g. https://my-app.onrender.com
+      - key: WS_ALLOWED_ORIGINS
+        sync: false
