@@ -27,11 +27,11 @@ public class ChatMessageRouter {
         this.jsonMapper = jsonMapper;
     }
 
-    /** Sends the message to every open connection of the receiver; returns true if at least one got it. */
-    boolean deliver(Long receiverId, ChatEvent.Message message) {
+    /** Sends the event to every open connection of the receiver; returns true if at least one got it. */
+    boolean deliver(Long receiverId, ChatEvent event) {
         boolean delivered = false;
         for (WebSocketSession session : registry.sessionsOf(receiverId)) {
-            delivered |= send(session, message);
+            delivered |= send(session, event);
         }
         return delivered;
     }

@@ -18,7 +18,6 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.Instant;
-import java.util.UUID;
 
 /**
  * /ws/chat?ticket=...: one-to-one messages between website users.
@@ -78,10 +77,10 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     protected void handleTextMessage(WebSocketSession rawSession, TextMessage frame) {
         // Any frame, ping or message, shows the client is alive
         registry.touch(rawSession);
-        WebSocketSession session = registry.get(rawSession);
-        Long senderId = (Long) session.getAttributes().get(USER_ID);
+        WebSocketSession senderSession = registry.get(rawSession);
+        Long senderId = (Long) senderSession.getAttributes().get(USER_ID);
         if (senderId == null) {
-            fail(session, "Connection has no user");
+            fail(senderSession, "Connection has no user");
             return;
         }
 
@@ -89,43 +88,54 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         try {
             request = jsonMapper.readValue(frame.getPayload(), ChatMessageRequest.class);
         } catch (JacksonException e) {
-            fail(session, "Malformed JSON message");
+            fail(senderSession, "Malformed JSON message");
             return;
         }
         if (request == null) {
-            fail(session, "Malformed JSON message");
+            fail(senderSession, "Malformed JSON message");
             return;
         }
 
         if (request.type() == null) {
-            fail(session, "type is required");
+            fail(senderSession, "type is required");
             return;
         }
         switch (request.type()) {
-            case ChatMessageRequest.PING -> router.send(session, new ChatEvent.Pong(Instant.now()));
-            case ChatMessageRequest.MESSAGE -> handleChatMessage(session, senderId, request);
-            default -> fail(session, "Unknown type: " + request.type());
+            case ChatMessageRequest.PING -> router.send(senderSession, new ChatEvent.Pong(Instant.now()));
+            case ChatMessageRequest.MESSAGE -> handleChatMessage(senderSession, senderId, request);
+            case ChatMessageRequest.READ_RECEIPT -> handleReadReceipt(senderSession, senderId, request);
+            default -> fail(senderSession, "Unknown type: " + request.type());
         }
     }
 
-    private void handleChatMessage(WebSocketSession session, Long senderId, ChatMessageRequest request) {
+    private void handleChatMessage(WebSocketSession senderSession, Long senderId, ChatMessageRequest request) {
         String text = blankToNull(request.text());
         String url = blankToNull(request.url());
-        String error = validate(senderId, request.receiverId(), text, url);
+        String error = validate(senderId, request, text, url);
         if (error != null) {
-            fail(session, error);
+            fail(senderSession, error);
             return;
         }
 
-        var message = new ChatEvent.Message(UUID.randomUUID().toString(), senderId, text, url, Instant.now());
+        var message = new ChatEvent.Message(request.id(), senderId, text, url, request.timestamp(), Instant.now());
         boolean delivered = router.deliver(request.receiverId(), message);
         // Receiver offline: tell the sender whether the id exists at all (messages
         // aren't stored yet)
         if (!delivered && !userRepository.existsById(request.receiverId())) {
-            fail(session, "Receiver not found");
+            fail(senderSession, "Receiver not found");
             return;
         }
-        router.send(session, new ChatEvent.Sent(message.id(), request.receiverId(), delivered, message.sentAt()));
+        router.send(senderSession, new ChatEvent.Sent(message.id(), request.receiverId(), delivered, message.sentAt()));
+    }
+
+    private void handleReadReceipt(WebSocketSession senderSession, Long readerId, ChatMessageRequest request) {
+        String error = validateReadReceipt(readerId, request);
+        if (error != null) {
+            fail(senderSession, error);
+            return;
+        }
+        // Best effort: if the message's sender is offline the receipt is lost, like an undelivered message
+        router.deliver(request.receiverId(), new ChatEvent.ReadReceipt(request.messageId(), readerId, Instant.now()));
     }
 
     // Browsers answer ChatHeartbeat's pings automatically; a pong means the client
@@ -153,11 +163,17 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     }
 
     /** Returns an error message, or null if the message is valid. */
-    private static String validate(Long senderId, Long receiverId, String text, String url) {
-        if (receiverId == null) {
+    private static String validate(Long senderId, ChatMessageRequest request, String text, String url) {
+        if (request.id() == null) {
+            return "id is required";
+        }
+        if (request.timestamp() == null) {
+            return "timestamp is required";
+        }
+        if (request.receiverId() == null) {
             return "receiverId is required";
         }
-        if (receiverId.equals(senderId)) {
+        if (request.receiverId().equals(senderId)) {
             return "Cannot send a message to yourself";
         }
         if (text == null && url == null) {
@@ -168,6 +184,20 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         }
         if (url != null && !isHttpUrl(url)) {
             return "url must be a valid http or https URL";
+        }
+        return null;
+    }
+
+    /** Returns an error message, or null if the read receipt is valid. */
+    private static String validateReadReceipt(Long readerId, ChatMessageRequest request) {
+        if (request.messageId() == null) {
+            return "messageId is required";
+        }
+        if (request.receiverId() == null) {
+            return "receiverId is required";
+        }
+        if (request.receiverId().equals(readerId)) {
+            return "Cannot send a read receipt to yourself";
         }
         return null;
     }
@@ -191,7 +221,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         return value == null || value.isBlank() ? null : value;
     }
 
-    private void fail(WebSocketSession session, String message) {
-        router.send(session, new ChatEvent.Failure(message));
+    private void fail(WebSocketSession senderSession, String message) {
+        router.send(senderSession, new ChatEvent.Failure(message));
     }
 }
