@@ -35,7 +35,7 @@ public class WsTicketManager implements TicketManager {
     // Bounded, so a flood of ticket requests can't use up memory: the oldest
     // tickets get evicted
     private static final int MAX_TICKETS = 10_000;
-    private static final int MAX_TICKETS_PER_USER = 2;
+    private static final int MAX_TICKETS_PER_USER = 1;
 
     // expiresAt is null for a connection ticket, which lasts until the connection
     // closes
