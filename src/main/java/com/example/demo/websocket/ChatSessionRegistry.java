@@ -1,9 +1,13 @@
 package com.example.demo.websocket;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorator;
 
+import java.io.IOException;
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
@@ -23,9 +27,12 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class ChatSessionRegistry {
 
+    private static final Logger log = LoggerFactory.getLogger(ChatSessionRegistry.class);
+
     private static final int SEND_TIME_LIMIT_MS = 10_000;
     private static final int BUFFER_SIZE_LIMIT_BYTES = 512 * 1024;
     private static final String LAST_SEEN_AT = "lastSeenAt";
+    private static final String TICKET = "ticket";
 
     // Raw session id -> decorated session
     private final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();
@@ -70,6 +77,33 @@ public class ChatSessionRegistry {
 
     Set<WebSocketSession> sessionsOf(Long userId) {
         return sessionsByUser.getOrDefault(userId, Set.of());
+    }
+
+    /** Records the connection ticket that stands for this session. */
+    void setTicket(WebSocketSession session, String ticket) {
+        session.getAttributes().put(TICKET, ticket);
+    }
+
+    /** The session's connection ticket, or null if its login ticket was rejected. */
+    String ticketOf(WebSocketSession session) {
+        return (String) session.getAttributes().get(TICKET);
+    }
+
+    /** Closes the user's session holding this ticket. Does nothing for a ticket no session holds. */
+    public void closeByTicket(Long userId, String ticket, CloseStatus status) {
+        for (WebSocketSession session : sessionsOf(userId)) {
+            if (ticket.equals(ticketOf(session))) {
+                close(session, status);
+            }
+        }
+    }
+
+    private void close(WebSocketSession session, CloseStatus status) {
+        try {
+            session.close(status);
+        } catch (IOException e) {
+            log.debug("Failed to close session {}", session.getId(), e);
+        }
     }
 
     public record SessionInfo(String sessionId, String remoteAddress, Instant lastSeenAt, boolean open) {

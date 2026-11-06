@@ -69,6 +69,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         }
         WebSocketSession session = registry.get(rawSession);
         session.getAttributes().put(USER_ID, userId);
+        registry.setTicket(session, ticketService.issueForConnection(userId));
         registry.bindUser(session, userId);
         router.send(session, new ChatEvent.Connected(userId));
     }
@@ -141,7 +142,9 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
-        registry.unregister(session, (Long) session.getAttributes().get(USER_ID));
+        Long userId = (Long) session.getAttributes().get(USER_ID);
+        ticketService.release(registry.ticketOf(session), userId);
+        registry.unregister(session, userId);
     }
 
     /** The ticket query parameter, or null if it's missing. */
