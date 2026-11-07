@@ -3,6 +3,7 @@ package com.example.demo.controller;
 import com.example.demo.dto.ApiResponse;
 import com.example.demo.dto.HealthStatsResponse;
 import com.example.demo.websocket.ChatSessionRegistry;
+import com.example.demo.websocket.MessageQueue;
 import com.example.demo.websocket.TicketManager;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -21,14 +22,17 @@ public class HealthController {
 
     private final ChatSessionRegistry sessionRegistry;
     private final TicketManager ticketManager;
+    private final MessageQueue messageQueue;
 
-    public HealthController(ChatSessionRegistry sessionRegistry, TicketManager ticketManager) {
+    public HealthController(ChatSessionRegistry sessionRegistry, TicketManager ticketManager,
+            MessageQueue messageQueue) {
         this.sessionRegistry = sessionRegistry;
         this.ticketManager = ticketManager;
+        this.messageQueue = messageQueue;
     }
 
     // TESTING ONLY: public (/health/** is permitAll) and lists live tickets, which anyone could
-    // use to connect as their owner. Remove or protect before deploying.
+    // use to connect as their owner, and the text of queued messages. Remove or protect before deploying.
     @PreAuthorize("permitAll()")
     @GetMapping("/stats")
     public ResponseEntity<ApiResponse<HealthStatsResponse>> stats() {
@@ -36,6 +40,10 @@ public class HealthController {
                 .map(e -> new HealthStatsResponse.UserSessions(e.getKey(), e.getValue()))
                 .toList();
         List<TicketManager.TicketEntry> tickets = ticketManager.all();
+        List<HealthStatsResponse.UserQueue> queues = messageQueue.all().entrySet().stream()
+                .map(e -> new HealthStatsResponse.UserQueue(e.getKey(), e.getValue()))
+                .toList();
+        int queuedMessageCount = queues.stream().mapToInt(q -> q.messages().size()).sum();
 
         Runtime runtime = Runtime.getRuntime();
         var memory = new HealthStatsResponse.MemoryStats(
@@ -45,7 +53,7 @@ public class HealthController {
                 runtime.maxMemory() / MB);
 
         var stats = new HealthStatsResponse(users.size(), sessionRegistry.sessionCount(), users,
-                tickets.size(), tickets, memory);
+                tickets.size(), tickets, sessionRegistry.connectionLog(), queuedMessageCount, queues, memory);
         return ResponseEntity.ok(ApiResponse.ok("Stats", stats));
     }
 

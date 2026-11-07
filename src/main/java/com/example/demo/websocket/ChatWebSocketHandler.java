@@ -45,14 +45,16 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     private final UserRepository userRepository;
     private final ChatSessionRegistry registry;
     private final ChatMessageRouter router;
+    private final MessageQueue messageQueue;
 
     public ChatWebSocketHandler(JsonMapper jsonMapper, WsTicketService ticketService, UserRepository userRepository,
-            ChatSessionRegistry registry, ChatMessageRouter router) {
+            ChatSessionRegistry registry, ChatMessageRouter router, MessageQueue messageQueue) {
         this.jsonMapper = jsonMapper;
         this.ticketService = ticketService;
         this.userRepository = userRepository;
         this.registry = registry;
         this.router = router;
+        this.messageQueue = messageQueue;
     }
 
     @Override
@@ -71,6 +73,8 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         registry.setTicket(session, ticketService.issueForConnection(userId));
         registry.bindUser(session, userId);
         router.send(session, new ChatEvent.Connected(userId));
+        // After bindUser, so a message arriving now can't be missed: at worst it's received twice
+        messageQueue.pending(userId).forEach(message -> router.send(session, message));
     }
 
     @Override
@@ -103,6 +107,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         switch (request.type()) {
             case ChatMessageRequest.PING -> router.send(senderSession, new ChatEvent.Pong(Instant.now()));
             case ChatMessageRequest.MESSAGE -> handleChatMessage(senderSession, senderId, request);
+            case ChatMessageRequest.MESSAGE_ACK -> handleMessageAck(senderSession, senderId, request);
             case ChatMessageRequest.READ_RECEIPT -> handleReadReceipt(senderSession, senderId, request);
             default -> fail(senderSession, "Unknown type: " + request.type());
         }
@@ -117,15 +122,31 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
             return;
         }
 
-        var message = new ChatEvent.Message(request.id(), senderId, text, url, request.timestamp(), Instant.now());
-        boolean delivered = router.deliver(request.receiverId(), message);
-        // Receiver offline: tell the sender whether the id exists at all (messages
-        // aren't stored yet)
-        if (!delivered && !userRepository.existsById(request.receiverId())) {
+        if (!userRepository.existsById(request.receiverId())) {
             fail(senderSession, "Receiver not found");
             return;
         }
-        router.send(senderSession, new ChatEvent.Sent(message.id(), request.receiverId(), delivered, message.sentAt()));
+        var message = new ChatEvent.Message(request.id(), senderId, text, url, request.timestamp(), Instant.now());
+        // Queued before it's sent: a write to a dropped connection can look successful
+        if (!messageQueue.enqueue(request.receiverId(), message)) {
+            fail(senderSession, "Receiver's queue is full");
+            return;
+        }
+        router.send(senderSession, new ChatEvent.Sent(message.id(), request.receiverId(), message.sentAt()));
+        router.deliver(request.receiverId(), message);
+    }
+
+    // The queue is the acking user's own, so nobody can ack a message sent to someone else
+    private void handleMessageAck(WebSocketSession senderSession, Long userId, ChatMessageRequest request) {
+        String error = validateMessageRef(request);
+        if (error != null) {
+            fail(senderSession, error);
+            return;
+        }
+        // false for a repeated ack, so the sender is only told once
+        if (messageQueue.ack(userId, request.receiverId(), request.messageId())) {
+            router.deliver(request.receiverId(), new ChatEvent.Delivered(request.messageId(), userId, Instant.now()));
+        }
     }
 
     private void handleReadReceipt(WebSocketSession senderSession, Long readerId, ChatMessageRequest request) {
@@ -190,14 +211,23 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
 
     /** Returns an error message, or null if the read receipt is valid. */
     private static String validateReadReceipt(Long readerId, ChatMessageRequest request) {
+        String error = validateMessageRef(request);
+        if (error != null) {
+            return error;
+        }
+        if (request.receiverId().equals(readerId)) {
+            return "Cannot send a read receipt to yourself";
+        }
+        return null;
+    }
+
+    /** Returns an error message, or null if the frame says which message it's about. */
+    private static String validateMessageRef(ChatMessageRequest request) {
         if (request.messageId() == null) {
             return "messageId is required";
         }
         if (request.receiverId() == null) {
             return "receiverId is required";
-        }
-        if (request.receiverId().equals(readerId)) {
-            return "Cannot send a read receipt to yourself";
         }
         return null;
     }

@@ -15,6 +15,7 @@ import java.util.UUID;
         @JsonSubTypes.Type(value = ChatEvent.Connected.class, name = "connected"),
         @JsonSubTypes.Type(value = ChatEvent.Message.class, name = "message"),
         @JsonSubTypes.Type(value = ChatEvent.Sent.class, name = "sent"),
+        @JsonSubTypes.Type(value = ChatEvent.Delivered.class, name = "delivered"),
         @JsonSubTypes.Type(value = ChatEvent.ReadReceipt.class, name = "readReceipt"),
         @JsonSubTypes.Type(value = ChatEvent.Pong.class, name = "pong"),
         @JsonSubTypes.Type(value = ChatEvent.Failure.class, name = "error")
@@ -33,8 +34,12 @@ public sealed interface ChatEvent {
             implements ChatEvent {
     }
 
-    /** Acknowledges the sender's message; delivered is false when the receiver has no open connection. */
-    record Sent(UUID id, Long receiverId, boolean delivered, Instant sentAt) implements ChatEvent {
+    /** The server has the sender's message queued for the receiver. Delivered follows once they ack it. */
+    record Sent(UUID id, Long receiverId, Instant sentAt) implements ChatEvent {
+    }
+
+    /** The receiver acked the sender's message. Lost if the sender is offline at that moment. */
+    record Delivered(UUID id, Long receiverId, Instant deliveredAt) implements ChatEvent {
     }
 
     /**

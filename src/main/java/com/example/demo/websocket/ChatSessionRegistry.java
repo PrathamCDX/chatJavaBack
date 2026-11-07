@@ -9,6 +9,7 @@ import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorato
 
 import java.io.IOException;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -33,10 +34,13 @@ public class ChatSessionRegistry {
     private static final int BUFFER_SIZE_LIMIT_BYTES = 512 * 1024;
     private static final String LAST_SEEN_AT = "lastSeenAt";
     private static final String TICKET = "ticket";
+    private static final int MAX_CONNECTION_LOG = 1000;
 
     // Raw session id -> decorated session
     private final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();
     private final Map<Long, Set<WebSocketSession>> sessionsByUser = new ConcurrentHashMap<>();
+    // Oldest first, and bounded so it can't grow forever: the oldest entries are dropped
+    private final List<ConnectionEvent> connectionLog = new ArrayList<>();
 
     void register(WebSocketSession session) {
         touch(session);
@@ -73,6 +77,7 @@ public class ChatSessionRegistry {
             userSessions.add(session);
             return userSessions;
         });
+        logConnection(userId, "connect");
     }
 
     Set<WebSocketSession> sessionsOf(Long userId) {
@@ -106,6 +111,25 @@ public class ChatSessionRegistry {
         }
     }
 
+    public record ConnectionEvent(Long userId, String event, Instant at) {
+    }
+
+    private void logConnection(Long userId, String event) {
+        synchronized (connectionLog) {
+            if (connectionLog.size() >= MAX_CONNECTION_LOG) {
+                connectionLog.removeFirst();
+            }
+            connectionLog.add(new ConnectionEvent(userId, event, Instant.now()));
+        }
+    }
+
+    /** Recent connects and disconnects of users, oldest first. For /health/stats. */
+    public List<ConnectionEvent> connectionLog() {
+        synchronized (connectionLog) {
+            return List.copyOf(connectionLog);
+        }
+    }
+
     public record SessionInfo(String sessionId, String remoteAddress, Instant lastSeenAt, boolean open) {
     }
 
@@ -136,5 +160,6 @@ public class ChatSessionRegistry {
             userSessions.remove(decorated);
             return userSessions.isEmpty() ? null : userSessions;
         });
+        logConnection(userId, "disconnect");
     }
 }
