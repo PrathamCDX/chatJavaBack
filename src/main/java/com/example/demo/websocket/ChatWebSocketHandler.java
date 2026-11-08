@@ -1,6 +1,7 @@
 package com.example.demo.websocket;
 
 import com.example.demo.repository.UserRepository;
+import com.example.demo.service.FileStorageService;
 import com.example.demo.service.WsTicketService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -9,6 +10,7 @@ import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.PongMessage;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
 import org.springframework.web.util.UriComponentsBuilder;
 import tools.jackson.core.JacksonException;
@@ -46,15 +48,18 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
     private final ChatSessionRegistry registry;
     private final ChatMessageRouter router;
     private final MessageQueue messageQueue;
+    private final FileStorageService fileStorageService;
 
     public ChatWebSocketHandler(JsonMapper jsonMapper, WsTicketService ticketService, UserRepository userRepository,
-            ChatSessionRegistry registry, ChatMessageRouter router, MessageQueue messageQueue) {
+            ChatSessionRegistry registry, ChatMessageRouter router, MessageQueue messageQueue,
+            FileStorageService fileStorageService) {
         this.jsonMapper = jsonMapper;
         this.ticketService = ticketService;
         this.userRepository = userRepository;
         this.registry = registry;
         this.router = router;
         this.messageQueue = messageQueue;
+        this.fileStorageService = fileStorageService;
     }
 
     @Override
@@ -107,6 +112,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         switch (request.type()) {
             case ChatMessageRequest.PING -> router.send(senderSession, new ChatEvent.Pong(Instant.now()));
             case ChatMessageRequest.MESSAGE -> handleChatMessage(senderSession, senderId, request);
+            case ChatMessageRequest.IMAGE -> handleImage(senderSession, senderId, request);
             case ChatMessageRequest.MESSAGE_ACK -> handleMessageAck(senderSession, senderId, request);
             case ChatMessageRequest.READ_RECEIPT -> handleReadReceipt(senderSession, senderId, request);
             default -> fail(senderSession, "Unknown type: " + request.type());
@@ -127,13 +133,38 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
             return;
         }
         var message = new ChatEvent.Message(request.id(), senderId, text, url, request.timestamp(), Instant.now());
+        enqueueAndDeliver(senderSession, request.receiverId(), message);
+    }
+
+    private void handleImage(WebSocketSession senderSession, Long senderId, ChatMessageRequest request) {
+        String error = validateEnvelope(senderId, request);
+        if (error != null) {
+            fail(senderSession, error);
+            return;
+        }
+        try {
+            fileStorageService.checkImageReady(request.id());
+        } catch (ResponseStatusException e) {
+            fail(senderSession, e.getReason());
+            return;
+        }
+        if (!userRepository.existsById(request.receiverId())) {
+            fail(senderSession, "Receiver not found");
+            return;
+        }
+        var image = new ChatEvent.Image(request.id(), senderId, FileStorageService.contentPath(request.id()),
+                request.timestamp(), Instant.now());
+        enqueueAndDeliver(senderSession, request.receiverId(), image);
+    }
+
+    private void enqueueAndDeliver(WebSocketSession senderSession, Long receiverId, ChatEvent.Queued event) {
         // Queued before it's sent: a write to a dropped connection can look successful
-        if (!messageQueue.enqueue(request.receiverId(), message)) {
+        if (!messageQueue.enqueue(receiverId, event)) {
             fail(senderSession, "Receiver's queue is full");
             return;
         }
-        router.send(senderSession, new ChatEvent.Sent(message.id(), request.receiverId(), message.sentAt()));
-        router.deliver(request.receiverId(), message);
+        router.send(senderSession, new ChatEvent.Sent(event.id(), receiverId, event.sentAt()));
+        router.deliver(receiverId, event);
     }
 
     // The queue is the acking user's own, so nobody can ack a message sent to someone else
@@ -185,6 +216,24 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
 
     /** Returns an error message, or null if the message is valid. */
     private static String validate(Long senderId, ChatMessageRequest request, String text, String url) {
+        String error = validateEnvelope(senderId, request);
+        if (error != null) {
+            return error;
+        }
+        if (text == null && url == null) {
+            return "text or url is required";
+        }
+        if (text != null && text.length() > MAX_TEXT_LENGTH) {
+            return "text must be at most " + MAX_TEXT_LENGTH + " characters";
+        }
+        if (url != null && !isHttpUrl(url)) {
+            return "url must be a valid http or https URL";
+        }
+        return null;
+    }
+
+    /** Returns an error message, or null if the fields every message and image needs are valid. */
+    private static String validateEnvelope(Long senderId, ChatMessageRequest request) {
         if (request.id() == null) {
             return "id is required";
         }
@@ -196,15 +245,6 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         }
         if (request.receiverId().equals(senderId)) {
             return "Cannot send a message to yourself";
-        }
-        if (text == null && url == null) {
-            return "text or url is required";
-        }
-        if (text != null && text.length() > MAX_TEXT_LENGTH) {
-            return "text must be at most " + MAX_TEXT_LENGTH + " characters";
-        }
-        if (url != null && !isHttpUrl(url)) {
-            return "url must be a valid http or https URL";
         }
         return null;
     }

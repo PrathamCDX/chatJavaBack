@@ -5,6 +5,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -35,6 +36,9 @@ public class SecurityConfig {
                         // so the chat handler checks a one-time ticket (?ticket=) when the connection opens.
                         // Only the handshake path: /ws/ticket, which issues tickets, needs the JWT
                         .requestMatchers("/ws/chat").permitAll()
+                        // File downloads: public for now so <img src> works without a token.
+                        // Anyone with a messageId can download that file
+                        .requestMatchers(HttpMethod.GET, "/file/*/content").permitAll()
                         // Default for every other endpoint: logged in
                         .anyRequest().authenticated())
                 // Write ApiResponse-shaped JSON for security errors too

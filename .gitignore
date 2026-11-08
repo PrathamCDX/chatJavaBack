@@ -38,6 +38,9 @@ build/
 .env.*
 !.env.example
 
+### Uploads ###
+uploads/
+
 ### SQLite ###
 *.db
 *.db-journal

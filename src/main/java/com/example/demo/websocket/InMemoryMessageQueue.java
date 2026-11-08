@@ -33,16 +33,16 @@ public class InMemoryMessageQueue implements MessageQueue {
     private record Key(Long senderId, UUID id) {
     }
 
-    private final Map<Long, Map<Key, ChatEvent.Message>> queues = new HashMap<>();
+    private final Map<Long, Map<Key, ChatEvent.Queued>> queues = new HashMap<>();
     private final Lock lock = new ReentrantLock();
     private int size = 0;
 
     @Override
-    public boolean enqueue(Long receiverId, ChatEvent.Message message) {
+    public boolean enqueue(Long receiverId, ChatEvent.Queued message) {
         Key key = new Key(message.senderId(), message.id());
         lock.lock();
         try {
-            Map<Key, ChatEvent.Message> queue = queues.getOrDefault(receiverId, Map.of());
+            Map<Key, ChatEvent.Queued> queue = queues.getOrDefault(receiverId, Map.of());
             if (queue.containsKey(key)) {
                 return true;
             }
@@ -58,7 +58,7 @@ public class InMemoryMessageQueue implements MessageQueue {
     }
 
     @Override
-    public List<ChatEvent.Message> pending(Long receiverId) {
+    public List<ChatEvent.Queued> pending(Long receiverId) {
         lock.lock();
         try {
             return List.copyOf(queues.getOrDefault(receiverId, Map.of()).values());
@@ -71,7 +71,7 @@ public class InMemoryMessageQueue implements MessageQueue {
     public boolean ack(Long receiverId, Long senderId, UUID messageId) {
         lock.lock();
         try {
-            Map<Key, ChatEvent.Message> queue = queues.get(receiverId);
+            Map<Key, ChatEvent.Queued> queue = queues.get(receiverId);
             if (queue == null || queue.remove(new Key(senderId, messageId)) == null) {
                 return false;
             }
@@ -86,10 +86,10 @@ public class InMemoryMessageQueue implements MessageQueue {
     }
 
     @Override
-    public Map<Long, List<ChatEvent.Message>> all() {
+    public Map<Long, List<ChatEvent.Queued>> all() {
         lock.lock();
         try {
-            Map<Long, List<ChatEvent.Message>> copy = new TreeMap<>();
+            Map<Long, List<ChatEvent.Queued>> copy = new TreeMap<>();
             queues.forEach((receiverId, queue) -> copy.put(receiverId, List.copyOf(queue.values())));
             return copy;
         } finally {

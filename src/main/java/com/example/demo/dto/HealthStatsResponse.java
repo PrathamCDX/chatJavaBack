@@ -26,7 +26,7 @@ public record HealthStatsResponse(
     public record UserSessions(Long userId, List<SessionInfo> sessions) {
     }
 
-    public record UserQueue(Long userId, List<ChatEvent.Message> messages) {
+    public record UserQueue(Long userId, List<ChatEvent.Queued> messages) {
     }
 
     /** JVM heap, in MB: used = total - free; max is the most the heap can grow to (-Xmx). */

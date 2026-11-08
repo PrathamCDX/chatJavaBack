@@ -10,6 +10,9 @@ import java.util.UUID;
  * type is required:
  * type "message": {"type":"message","id":"<uuid>","timestamp":"2026-11-06T09:25:19Z","receiverId":14,"text":"hi","url":null}
  * id and timestamp are required for "message"; the client generates them, and the "sent" ack carries the same id
+ * type "image": {"type":"image","id":"<uuid>","timestamp":"2026-11-06T09:25:19Z","receiverId":14}
+ * id is the messageId the image was uploaded with (POST /file/initiate, PUT /storage/...); every part must be
+ * uploaded first. The receiver gets {"type":"image",...,"url":"/file/<id>/content"}. Acked like a message
  * type "messageAck": {"type":"messageAck","messageId":"<uuid>","receiverId":13}
  * sent for every message received, even a repeat; until then the server resends it on each connect
  * type "readReceipt": {"type":"readReceipt","messageId":"<uuid>","receiverId":13}
@@ -20,6 +23,7 @@ public record ChatMessageRequest(String type, UUID id, Instant timestamp, Long r
         UUID messageId) {
 
     public static final String MESSAGE = "message";
+    public static final String IMAGE = "image";
     public static final String MESSAGE_ACK = "messageAck";
     public static final String READ_RECEIPT = "readReceipt";
     public static final String PING = "ping";
