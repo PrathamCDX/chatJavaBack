@@ -19,7 +19,6 @@ public interface FileStorageRepository extends JpaRepository<FileStorage, Long> 
 
     // Atomic insert-if-missing: two requests racing on the same part can't both insert, and the
     // loser doesn't fail on the unique constraint. Returns 1 if inserted, 0 if it already existed.
-    // ON CONFLICT works on SQLite and PostgreSQL.
     @Transactional
     @Modifying
     @Query(value = "insert into file_storage (file_id, part_no) values (:fileId, :partNo) "

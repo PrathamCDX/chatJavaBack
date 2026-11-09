@@ -7,6 +7,17 @@ services:
     # /health itself is a 404; any /health/<id> answers 200
     healthCheckPath: /health/live
     envVars:
+      # Render's connection string is postgresql://..., not JDBC, so the parts are passed separately
+      - key: DB_HOST
+        fromDatabase: { name: demo-db, property: host }
+      - key: DB_PORT
+        fromDatabase: { name: demo-db, property: port }
+      - key: DB_NAME
+        fromDatabase: { name: demo-db, property: database }
+      - key: DB_USERNAME
+        fromDatabase: { name: demo-db, property: user }
+      - key: DB_PASSWORD
+        fromDatabase: { name: demo-db, property: password }
       # Generated once by Render; without it the app falls back to the public default in application.properties
       - key: JWT_SECRET
         generateValue: true
@@ -15,3 +26,8 @@ services:
       # Asked for when the Blueprint is created: the frontend's URL, e.g. https://my-app.onrender.com
       - key: WS_ALLOWED_ORIGINS
         sync: false
+
+databases:
+  - name: demo-db
+    plan: free
+    databaseName: javademo

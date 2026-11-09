@@ -87,8 +87,8 @@ public class FileStorageService {
      * Saves a part of the message's file. Idempotent: repeating it replaces the part's content and
      * leaves one row. The file's details must exist first.
      *
-     * Not @Transactional on purpose: the upload can be slow, and a transaction would hold SQLite's
-     * only connection the whole time. The bytes are saved first, then the row is added, so a failed
+     * Not @Transactional on purpose: the upload can be slow, and a transaction would hold a database
+     * connection the whole time. The bytes are saved first, then the row is added, so a failed
      * save leaves no row.
      */
     public PutResult putPart(UUID messageId, Long partNo, InputStream content) {

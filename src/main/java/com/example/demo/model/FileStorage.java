@@ -4,23 +4,19 @@ import jakarta.persistence.*;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 
-// Unique on (file_id, part_no): created in schema.sql, because Hibernate skips multi-column unique
-// constraints and indexes on SQLite
+// Unique on (file_id, part_no): a part is stored once, and insertIfAbsent relies on it
 @Entity
-@Table(name = "file_storage")
+@Table(name = "file_storage",
+        uniqueConstraints = @UniqueConstraint(name = "ux_file_storage_file_part", columnNames = {"file_id", "part_no"}))
 public class FileStorage {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // Hibernate leaves foreign keys out on SQLite, so the column definition declares it instead.
-    // NO_CONSTRAINT stops Hibernate adding a second, identical one on databases where it does create them.
     // ON DELETE CASCADE: deleting a file removes its parts in the database
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "file_id", nullable = false,
-            columnDefinition = "bigint references file_details (id) on delete cascade",
-            foreignKey = @ForeignKey(ConstraintMode.NO_CONSTRAINT))
+    @JoinColumn(name = "file_id", nullable = false)
     @OnDelete(action = OnDeleteAction.CASCADE)
     private FileDetails file;
 

@@ -4,10 +4,9 @@ import jakarta.persistence.*;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 
-// Unique on (user_id, role_id): created in schema.sql, because Hibernate skips multi-column unique
-// constraints and indexes on SQLite
 @Entity
-@Table(name = "user_roles")
+@Table(name = "user_roles",
+        uniqueConstraints = @UniqueConstraint(name = "ux_user_roles_user_role", columnNames = {"user_id", "role_id"}))
 public class UserRole {
 
     @Id
