@@ -14,7 +14,7 @@ public interface FileStorageRepository extends JpaRepository<FileStorage, Long> 
 
     Optional<FileStorage> findByFileIdAndPartNo(Long fileId, Long partNo);
 
-    @Query("select p.partNo from FileStorage p where p.file.id = :fileId")
+    @Query("select p.partNo from FileStorage p where p.file.id = :fileId order by p.partNo")
     List<Long> findPartNosByFileId(@Param("fileId") Long fileId);
 
     // Atomic insert-if-missing: two requests racing on the same part can't both insert, and the

@@ -2,9 +2,11 @@ package com.example.demo.controller;
 
 import com.example.demo.dto.ApiResponse;
 import com.example.demo.dto.FilePartResponse;
+import com.example.demo.dto.FilePartsResponse;
 import com.example.demo.service.FileStorageService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -33,5 +35,11 @@ public class FileStorageController {
         return result.created()
                 ? ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok("Part stored", result.part()))
                 : ResponseEntity.ok(ApiResponse.ok("Part already stored", result.part()));
+    }
+
+    // Part numbers uploaded so far and those still to send, both ascending; lets a client resume an upload
+    @GetMapping("/{messageId}/parts")
+    public ResponseEntity<ApiResponse<FilePartsResponse>> listParts(@PathVariable UUID messageId) {
+        return ResponseEntity.ok(ApiResponse.ok("Parts", fileStorageService.listParts(messageId)));
     }
 }

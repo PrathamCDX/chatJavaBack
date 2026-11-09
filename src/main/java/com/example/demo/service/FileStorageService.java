@@ -3,6 +3,7 @@ package com.example.demo.service;
 import com.example.demo.dto.FileDetailsResponse;
 import com.example.demo.dto.FileInitiateRequest;
 import com.example.demo.dto.FilePartResponse;
+import com.example.demo.dto.FilePartsResponse;
 import com.example.demo.model.FileDetails;
 import com.example.demo.repository.FileDetailsRepository;
 import com.example.demo.repository.FileStorageRepository;
@@ -109,6 +110,22 @@ public class FileStorageService {
                 .map(FilePartResponse::from)
                 .orElseThrow();
         return new PutResult(part, created);
+    }
+
+    /** Which parts of the message's file are uploaded and which are still needed, both ascending. */
+    @Transactional(readOnly = true)
+    public FilePartsResponse listParts(UUID messageId) {
+        FileDetails file = fileDetailsRepository.findByMessageId(messageId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "File not found"));
+        List<Long> uploaded = fileStorageRepository.findPartNosByFileId(file.getId());
+        Set<Long> stored = new HashSet<>(uploaded);
+        List<Long> missing = new ArrayList<>();
+        for (long partNo = 0; partNo < file.getParts(); partNo++) {
+            if (!stored.contains(partNo)) {
+                missing.add(partNo);
+            }
+        }
+        return new FilePartsResponse(file.getId(), file.getParts(), uploaded, missing);
     }
 
     /**
