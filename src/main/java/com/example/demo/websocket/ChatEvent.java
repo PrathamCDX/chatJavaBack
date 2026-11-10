@@ -15,6 +15,7 @@ import java.util.UUID;
         @JsonSubTypes.Type(value = ChatEvent.Connected.class, name = "connected"),
         @JsonSubTypes.Type(value = ChatEvent.Message.class, name = "message"),
         @JsonSubTypes.Type(value = ChatEvent.Image.class, name = "image"),
+        @JsonSubTypes.Type(value = ChatEvent.Document.class, name = "document"),
         @JsonSubTypes.Type(value = ChatEvent.Sent.class, name = "sent"),
         @JsonSubTypes.Type(value = ChatEvent.Delivered.class, name = "delivered"),
         @JsonSubTypes.Type(value = ChatEvent.ReadReceipt.class, name = "readReceipt"),
@@ -31,8 +32,8 @@ public sealed interface ChatEvent {
      * A message from another user. id and timestamp are what the sender's client sent, so they
      * can't be trusted; sentAt is the server's clock, so use it for ordering.
      */
-    /** What's kept in the receiver's queue until they ack it: messages and images. */
-    sealed interface Queued extends ChatEvent permits Message, Image {
+    /** What's kept in the receiver's queue until they ack it: messages, images and documents. */
+    sealed interface Queued extends ChatEvent permits Message, Image, Document {
 
         UUID id();
 
@@ -50,6 +51,15 @@ public sealed interface ChatEvent {
      * prefix it with the API's address. id is also the file's messageId.
      */
     record Image(UUID id, Long senderId, String url, Instant timestamp, Instant sentAt) implements Queued {
+    }
+
+    /**
+     * A file from another user, with any extension, e.g. a pdf or zip. url works like Image's; the server
+     * shows images, video and audio in the browser and offers everything else as a download.
+     * extension and sizeKb are what the sender declared when uploading.
+     */
+    record Document(UUID id, Long senderId, String url, String extension, Long sizeKb, Instant timestamp,
+            Instant sentAt) implements Queued {
     }
 
     /** The server has the sender's message queued for the receiver. Delivered follows once they ack it. */

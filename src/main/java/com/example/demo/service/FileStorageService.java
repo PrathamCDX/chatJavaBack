@@ -65,11 +65,8 @@ public class FileStorageService {
     public InitiateResult initiate(FileInitiateRequest request) {
         // ".JPG" and "jpg" are the same extension
         String extension = request.extension().replaceFirst("^\\.", "").toLowerCase(Locale.ROOT);
-        // Only checks the name: the uploaded bytes could still be something else
-        if (!IMAGE_EXTENSIONS.contains(extension)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Only images are allowed: " + String.join(", ", IMAGE_EXTENSIONS.stream().sorted().toList()));
-        }
+        // Any extension: documents can be anything. Only the image message type limits it (checkImageReady).
+        // Safe to serve because openFile only shows images, video and audio in the browser; the rest are downloads
         boolean created = fileDetailsRepository.insertIfAbsent(extension, request.sizeKb(), request.messageId(),
                 request.parts()) == 1;
         FileDetails file = fileDetailsRepository.findByMessageId(request.messageId()).orElseThrow();
@@ -169,11 +166,20 @@ public class FileStorageService {
     public void checkImageReady(UUID messageId) {
         FileDetails file = fileDetailsRepository.findByMessageId(messageId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Image not found"));
-        // Files initiated before only images were allowed can be something else
+        // Only checks the name: the uploaded bytes could still be something else
         if (!IMAGE_EXTENSIONS.contains(file.getExtension())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "File is not an image");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "File is not an image: " + String.join(", ", IMAGE_EXTENSIONS.stream().sorted().toList()));
         }
         completeParts(file);
+    }
+
+    /** Like checkImageReady, for a document, which can have any extension. Returns its details for the chat event. */
+    public FileDetailsResponse checkDocumentReady(UUID messageId) {
+        FileDetails file = fileDetailsRepository.findByMessageId(messageId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document not found"));
+        completeParts(file);
+        return FileDetailsResponse.from(file);
     }
 
     /** The message's file, with its parts joined in order. Fails if any part hasn't been uploaded. */

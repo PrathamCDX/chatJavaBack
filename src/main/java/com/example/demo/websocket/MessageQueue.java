@@ -5,7 +5,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Messages and images the server still owes each receiver. A message stays queued until the receiver acks
+ * Messages, images and documents the server still owes each receiver. A message stays queued until the receiver acks
  * it, so one lost to a dropped connection is sent again when the receiver reconnects.
  */
 public interface MessageQueue {

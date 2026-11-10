@@ -1,5 +1,6 @@
 package com.example.demo.websocket;
 
+import com.example.demo.dto.FileDetailsResponse;
 import com.example.demo.repository.UserRepository;
 import com.example.demo.service.FileStorageService;
 import com.example.demo.service.WsTicketService;
@@ -113,6 +114,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
             case ChatMessageRequest.PING -> router.send(senderSession, new ChatEvent.Pong(Instant.now()));
             case ChatMessageRequest.MESSAGE -> handleChatMessage(senderSession, senderId, request);
             case ChatMessageRequest.IMAGE -> handleImage(senderSession, senderId, request);
+            case ChatMessageRequest.DOCUMENT -> handleDocument(senderSession, senderId, request);
             case ChatMessageRequest.MESSAGE_ACK -> handleMessageAck(senderSession, senderId, request);
             case ChatMessageRequest.READ_RECEIPT -> handleReadReceipt(senderSession, senderId, request);
             default -> fail(senderSession, "Unknown type: " + request.type());
@@ -155,6 +157,28 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         var image = new ChatEvent.Image(request.id(), senderId, FileStorageService.contentPath(request.id()),
                 request.timestamp(), Instant.now());
         enqueueAndDeliver(senderSession, request.receiverId(), image);
+    }
+
+    private void handleDocument(WebSocketSession senderSession, Long senderId, ChatMessageRequest request) {
+        String error = validateEnvelope(senderId, request);
+        if (error != null) {
+            fail(senderSession, error);
+            return;
+        }
+        FileDetailsResponse file;
+        try {
+            file = fileStorageService.checkDocumentReady(request.id());
+        } catch (ResponseStatusException e) {
+            fail(senderSession, e.getReason());
+            return;
+        }
+        if (!userRepository.existsById(request.receiverId())) {
+            fail(senderSession, "Receiver not found");
+            return;
+        }
+        var document = new ChatEvent.Document(request.id(), senderId, FileStorageService.contentPath(request.id()),
+                file.extension(), file.sizeKb(), request.timestamp(), Instant.now());
+        enqueueAndDeliver(senderSession, request.receiverId(), document);
     }
 
     private void enqueueAndDeliver(WebSocketSession senderSession, Long receiverId, ChatEvent.Queued event) {
@@ -232,7 +256,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
         return null;
     }
 
-    /** Returns an error message, or null if the fields every message and image needs are valid. */
+    /** Returns an error message, or null if the fields every message, image and document needs are valid. */
     private static String validateEnvelope(Long senderId, ChatMessageRequest request) {
         if (request.id() == null) {
             return "id is required";

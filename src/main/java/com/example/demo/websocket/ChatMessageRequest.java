@@ -13,6 +13,9 @@ import java.util.UUID;
  * type "image": {"type":"image","id":"<uuid>","timestamp":"2026-11-06T09:25:19Z","receiverId":14}
  * id is the messageId the image was uploaded with (POST /file/initiate, PUT /storage/...); every part must be
  * uploaded first. The receiver gets {"type":"image",...,"url":"/file/<id>/content"}. Acked like a message
+ * type "document": {"type":"document","id":"<uuid>","timestamp":"2026-11-06T09:25:19Z","receiverId":14}
+ * same as "image", for a file with any extension. The receiver gets
+ * {"type":"document",...,"url":"/file/<id>/content","extension":"pdf","sizeKb":120}
  * type "messageAck": {"type":"messageAck","messageId":"<uuid>","receiverId":13}
  * sent for every message received, even a repeat; until then the server resends it on each connect
  * type "readReceipt": {"type":"readReceipt","messageId":"<uuid>","receiverId":13}
@@ -24,6 +27,7 @@ public record ChatMessageRequest(String type, UUID id, Instant timestamp, Long r
 
     public static final String MESSAGE = "message";
     public static final String IMAGE = "image";
+    public static final String DOCUMENT = "document";
     public static final String MESSAGE_ACK = "messageAck";
     public static final String READ_RECEIPT = "readReceipt";
     public static final String PING = "ping";
