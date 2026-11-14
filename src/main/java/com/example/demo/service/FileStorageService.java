@@ -17,17 +17,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.SequenceInputStream;
-import java.io.UncheckedIOException;
+import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
-import java.util.Enumeration;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -148,13 +147,13 @@ public class FileStorageService {
     }
 
     /**
-     * A whole file, ready to send. content reads the parts one after another as it's read, so the
-     * file is never held in memory; whoever reads it must close it.
+     * A whole file, ready to send with writeRange: its parts in order and each one's size. Nothing is open yet.
      * inline is false for types a browser could run as a page (like html or svg): those are only
      * offered as downloads, so a file served from this server can't run scripts on it.
+     * etag identifies this version of the file; it changes when a part is uploaded again.
      */
-    public record FileContent(MediaType contentType, boolean inline, long size, String filename,
-            InputStream content) {
+    public record FileContent(MediaType contentType, boolean inline, long size, String filename, String etag,
+            List<Path> parts, List<Long> partSizes) {
     }
 
     /** Where the message's file can be downloaded, relative to the API's address. */
@@ -182,26 +181,63 @@ public class FileStorageService {
         return FileDetailsResponse.from(file);
     }
 
-    /** The message's file, with its parts joined in order. Fails if any part hasn't been uploaded. */
+    /** The message's file, with its parts in order. Fails if any part hasn't been uploaded. */
     public FileContent openFile(UUID messageId) {
         FileDetails file = fileDetailsRepository.findByMessageId(messageId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "File not found"));
         List<Path> parts = completeParts(file);
+        List<Long> partSizes = new ArrayList<>();
         long size = 0;
+        long lastModified = 0;
         for (Path part : parts) {
             try {
-                size += Files.size(part);
+                BasicFileAttributes attributes = Files.readAttributes(part, BasicFileAttributes.class);
+                partSizes.add(attributes.size());
+                size += attributes.size();
+                lastModified = Math.max(lastModified, attributes.lastModifiedTime().toMillis());
             } catch (IOException e) {
                 throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to read file", e);
             }
         }
+        // Uploading a part again writes a new file, so its modified time changes and so does the etag
+        String etag = "\"" + messageId + "-" + size + "-" + lastModified + "\"";
 
         MediaType contentType = MediaTypeFactory.getMediaType("file." + file.getExtension())
                 .orElse(MediaType.APPLICATION_OCTET_STREAM);
         boolean inline = (contentType.getType().equals("image") && !contentType.getSubtype().contains("svg"))
                 || contentType.getType().equals("video") || contentType.getType().equals("audio");
-        return new FileContent(contentType, inline, size, messageId + "." + file.getExtension(),
-                joinParts(parts));
+        return new FileContent(contentType, inline, size, messageId + "." + file.getExtension(), etag, parts,
+                partSizes);
+    }
+
+    /**
+     * Writes bytes start to end (both inclusive, counted from 0) of the file to out. Only the parts holding
+     * those bytes are opened, one at a time, and the start of the first one is skipped without being read.
+     */
+    public void writeRange(FileContent file, long start, long end, OutputStream out) throws IOException {
+        long partStart = 0;
+        for (int i = 0; i < file.parts().size() && partStart <= end; i++) {
+            long partEnd = partStart + file.partSizes().get(i) - 1;
+            if (partEnd >= start) {
+                try (InputStream in = Files.newInputStream(file.parts().get(i))) {
+                    in.skipNBytes(Math.max(start, partStart) - partStart);
+                    copy(in, out, Math.min(end, partEnd) - Math.max(start, partStart) + 1);
+                }
+            }
+            partStart = partEnd + 1;
+        }
+    }
+
+    private static void copy(InputStream in, OutputStream out, long count) throws IOException {
+        byte[] buffer = new byte[64 * 1024];
+        while (count > 0) {
+            int read = in.read(buffer, 0, (int) Math.min(buffer.length, count));
+            if (read == -1) {
+                throw new EOFException("Part is shorter than when the download started");
+            }
+            out.write(buffer, 0, read);
+            count -= read;
+        }
     }
 
     /** The paths of all the file's parts, in order. Throws 409 if any isn't recorded or isn't on disk. */
@@ -217,26 +253,5 @@ public class FileStorageService {
             parts.add(part);
         }
         return parts;
-    }
-
-    // Opens each part only when the previous one is used up, so a file with many parts doesn't
-    // hold many files open at once
-    private static InputStream joinParts(List<Path> parts) {
-        Iterator<Path> remaining = parts.iterator();
-        return new SequenceInputStream(new Enumeration<InputStream>() {
-            @Override
-            public boolean hasMoreElements() {
-                return remaining.hasNext();
-            }
-
-            @Override
-            public InputStream nextElement() {
-                try {
-                    return Files.newInputStream(remaining.next());
-                } catch (IOException e) {
-                    throw new UncheckedIOException(e);
-                }
-            }
-        });
     }
 }
